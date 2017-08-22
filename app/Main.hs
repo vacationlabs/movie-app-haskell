@@ -1,5 +1,7 @@
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric        #-}
+{-# LANGUAGE ExtendedDefaultRules #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE OverloadedStrings    #-}
 
 module Main where
 
@@ -24,6 +26,7 @@ import           Lib
 import qualified Data.Map                as Map
 import           Data.Text.Internal.Lazy
 import           Data.Text.Lazy
+import qualified Data.Vector             as Vector
 import           Lucid
 import           Lucid.Base
 import           Lucid.Html5
@@ -57,7 +60,31 @@ data MovieInfo = MovieInfo {
 instance ToJSON MovieInfo
 instance FromJSON MovieInfo
 
+data CastDetails = CastDetails {
+ cd_id   :: Integer,
+ cd_cast :: [CastMemberInfo]
+} deriving (Show, Generic)
+instance ToJSON CastDetails
+instance FromJSON CastDetails where
+  parseJSON = genericParseJSON (defaultOptions {fieldLabelModifier = Prelude.drop 3})
+
+data CastMemberInfo = CastMemberInfo {
+ cm_id        :: Integer,
+ cm_character :: String,
+ cm_name      :: String
+} deriving (Show, Generic)
+instance ToJSON CastMemberInfo
+instance FromJSON CastMemberInfo where
+  parseJSON = genericParseJSON (defaultOptions {fieldLabelModifier = Prelude.drop 3})
+
 replaceSpace = Prelude.map (\c -> if c==' ' then '+' ; else c)
+
+makeCastLink :: CastMemberInfo -> Html ()
+makeCastLink cast =
+  li_ $ a_ [href_ link] (toHtml $ cm_character cast)
+  where
+    link :: T.Text
+    link = T.pack $ "/cast/" ++ (show $ cm_id cast)
 
 main :: IO ()
 main =
@@ -75,6 +102,10 @@ main =
           input_ [typeTextAttr, inputBoxNameAttr]
           with button_ [typeSubmitAttr] "Search"
 
+   Scotty.get "/cast/:id" $ do
+     c_id <- Scotty.param "id"
+     html $ mconcat ["<h1>", c_id, "</h1>"]
+
    Scotty.post "/" $ do
     -- html "Welcome to post!"
     movie <- Scotty.param "movieName"
@@ -88,6 +119,8 @@ main =
         let movieIdString = show $ truncate id
         movieInfo <- liftIO $ Wreq.get ("https://api.themoviedb.org/3/movie/"++ movieIdString ++"?api_key=443faaae5d25a64487005863edc6c726&language=en-US")
         let movieInfoDisplay = decode (movieInfo ^. responseBody) :: Maybe MovieInfo
+        castInfo <- liftIO $ Wreq.get ("https://api.themoviedb.org/3/movie/" ++ movieIdString ++ "/credits?api_key=443faaae5d25a64487005863edc6c726")
+        let castInfoDisplay = decode (castInfo ^. responseBody) :: Maybe CastDetails
         case movieInfoDisplay of
           Just movie ->
            html . renderText $
@@ -97,5 +130,11 @@ main =
               p_ $ toHtml $ "Plot Overview : " ++ overview movie
               p_ $ toHtml $ "Release Date : " ++ release_date movie
             -- html $ toS (show  movie) -- +"2nd call returned"
+              ul_ $ case castInfoDisplay of
+                Just castInfo -> do
+                  let casts = cd_cast castInfo
+                  mconcat $ fmap makeCastLink casts :: Html ()
+                Nothing -> toHtmlRaw "Could not parse Cast details into CastInfo type"
           Nothing -> raw "Could not parse Movie details into MovieInfo type"
+
       Nothing -> raw "Could not get a valid movie ID from the search query"

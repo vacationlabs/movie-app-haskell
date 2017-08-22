@@ -38,6 +38,7 @@ executable movie-app-haskell-exe
                      , time
                      , lens-aeson
                      , scientific
+                     , vector
   default-language:    Haskell2010
 
 test-suite movie-app-haskell-test
