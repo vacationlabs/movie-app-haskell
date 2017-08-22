@@ -77,14 +77,39 @@ instance ToJSON CastMemberInfo
 instance FromJSON CastMemberInfo where
   parseJSON = genericParseJSON (defaultOptions {fieldLabelModifier = Prelude.drop 3})
 
+data ActorCreditsFull = ActorCreditsFull{
+  ac_cast :: [ActorCreditMovies]
+} deriving (Show, Generic)
+instance ToJSON ActorCreditsFull
+instance FromJSON ActorCreditsFull where
+  parseJSON = genericParseJSON (defaultOptions {fieldLabelModifier = Prelude.drop 3})
+
+data ActorCreditMovies = ActorCreditMovies{
+  ac_character    :: String,
+  ac_release_date :: String,
+  ac_title        :: String,
+  ac_overview     :: String
+} deriving (Show, Generic)
+instance ToJSON ActorCreditMovies
+instance FromJSON ActorCreditMovies where
+  parseJSON = genericParseJSON (defaultOptions {fieldLabelModifier = Prelude.drop 3})
+
 replaceSpace = Prelude.map (\c -> if c==' ' then '+' ; else c)
 
 makeCastLink :: CastMemberInfo -> Html ()
 makeCastLink cast =
-  li_ $ a_ [href_ link] (toHtml $ cm_character cast)
+  li_ $ do
+  span_ $ toHtml $ cm_character cast ++ " : "
+  a_ [href_ link] $ toHtml $ cm_name cast
   where
     link :: T.Text
-    link = T.pack $ "/cast/" ++ (show $ cm_id cast)
+    link = T.pack $ "/cast/" ++ show (cm_id cast)
+
+makeMoviesList :: ActorCreditMovies -> Html()
+makeMoviesList actorMovies =
+ li_ $ do
+   span_ (toHtml $ ac_character actorMovies ++ " in " ++ ac_title actorMovies)
+   p_ (toHtml $ ac_overview actorMovies)
 
 main :: IO ()
 main =
@@ -103,8 +128,19 @@ main =
           with button_ [typeSubmitAttr] "Search"
 
    Scotty.get "/cast/:id" $ do
-     c_id <- Scotty.param "id"
-     html $ mconcat ["<h1>", c_id, "</h1>"]
+    castCredit_param <- Scotty.param "id"
+    let castCredit_id = Data.Text.Lazy.unpack castCredit_param
+    html $ mconcat ["<h1>", castCredit_param, "</h1>"]
+    castCreditResponse <- liftIO $ Wreq.get ("https://api.themoviedb.org/3/person/"++ castCredit_id ++"/movie_credits?api_key=443faaae5d25a64487005863edc6c726&language=en-US")
+    let castCreditMovies = decode (castCreditResponse ^. responseBody) ::Maybe ActorCreditsFull
+    case castCreditMovies of
+      Just actorMovies -> do
+       let actorMoviesList = ac_cast actorMovies
+       html . renderText $
+        html_ $
+         body_ $ do
+          h1_ $ toHtml "Other roles played (movies) : "
+          mconcat $ fmap makeMoviesList (Prelude.take 5 actorMoviesList) :: Html()
 
    Scotty.post "/" $ do
     -- html "Welcome to post!"
@@ -133,7 +169,7 @@ main =
               ul_ $ case castInfoDisplay of
                 Just castInfo -> do
                   let casts = cd_cast castInfo
-                  mconcat $ fmap makeCastLink casts :: Html ()
+                  mconcat $ fmap makeCastLink (Prelude.take 5 casts) :: Html ()
                 Nothing -> toHtmlRaw "Could not parse Cast details into CastInfo type"
           Nothing -> raw "Could not parse Movie details into MovieInfo type"
 
